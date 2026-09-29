@@ -9,6 +9,41 @@ FRAMEWORK_REVISION="247dee9888c51606b939f027bce54504f8ca26fa"
 FRAMEWORK_PATCH="$ROOT/osu.Web/patches/osu-framework-web.patch"
 DOTNET_VERSION="10.0.401"
 
+# Vercel's build image is based on Amazon Linux 2023, whose base image does not ship everything this
+# build needs (git, tar, gzip, find), has no ICU, which the .NET host itself requires, and no
+# libatomic, which the workload's emscripten node binary requires. Install whatever is missing
+# instead of relying on the build image's package set.
+required_tools=(git tar gzip find curl)
+required_packages=(git tar gzip findutils curl)
+missing_packages=()
+
+for index in "${!required_tools[@]}"; do
+    command -v "${required_tools[$index]}" >/dev/null 2>&1 || missing_packages+=("${required_packages[$index]}")
+done
+
+if command -v dnf >/dev/null 2>&1; then
+    compgen -G '/usr/lib64/libicu*' >/dev/null || missing_packages+=(libicu)
+    compgen -G '/usr/lib64/libatomic*' >/dev/null || missing_packages+=(libatomic)
+fi
+
+if [ "${#missing_packages[@]}" -gt 0 ]; then
+    echo "Installing missing build prerequisites: ${missing_packages[*]}"
+
+    if command -v dnf >/dev/null 2>&1; then
+        # The Amazon Linux image provides curl-minimal. Do not request the conflicting full curl
+        # package when that already supplies the curl executable.
+        dnf install -y "${missing_packages[@]}"
+    elif command -v apt-get >/dev/null 2>&1; then
+        apt-get update -qq && apt-get install -y -qq "${missing_packages[@]}"
+    elif command -v apk >/dev/null 2>&1; then
+        apk add --no-cache "${missing_packages[@]}"
+    fi
+fi
+
+for tool in "${required_tools[@]}"; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool is required but unavailable" >&2; exit 1; }
+done
+
 if [ ! -f "$FRAMEWORK_DIR/osu.Framework/osu.Framework.csproj" ]; then
     rm -rf "$FRAMEWORK_DIR"
     mkdir -p "$(dirname "$FRAMEWORK_DIR")"

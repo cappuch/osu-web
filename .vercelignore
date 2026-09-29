@@ -13,7 +13,8 @@ osu.Web/native/build/
 osu.Web/tools/node_modules/
 
 # Developer-only projects not used by the browser build.
-CodeAnalysis/
+# CodeAnalysis is required: Directory.Build.props references CodeAnalysis/BannedSymbols.txt and
+# CodeAnalysis/osu.globalconfig, and a build without them fails with CS2001.
 Templates/
 osu.Android/
 osu.Desktop/
