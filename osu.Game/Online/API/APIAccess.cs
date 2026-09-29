@@ -662,7 +662,11 @@ namespace osu.Game.Online.API
 
                 if (state.Value == APIState.Offline)
                 {
+#if OSU_WEB
+                    request.Fail(new InvalidOperationException(@"User not logged in"));
+#else
                     request.Fail(new WebException(@"User not logged in"));
+#endif
                     return;
                 }
 

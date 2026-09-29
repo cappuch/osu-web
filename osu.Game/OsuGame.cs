@@ -405,9 +405,47 @@ namespace osu.Game
                     string[] paths = dragDropFiles.ToArray();
                     dragDropFiles.Clear();
 
+#if OSU_WEB
+                    // LongRunning creates a dedicated browser worker for every drop. Import asynchronously instead,
+                    // and always remove the temporary MEMFS copy (including unsupported/corrupt files).
+                    _ = importDroppedFiles(paths);
+#else
                     Task.Factory.StartNew(() => Import(paths), TaskCreationOptions.LongRunning);
+#endif
                 }
             }
+
+#if OSU_WEB
+            async Task importDroppedFiles(string[] paths)
+            {
+                try
+                {
+                    await Import(paths).ConfigureAwait(false);
+                }
+                catch (Exception e)
+                {
+                    Logger.Error(e, "Could not import dropped files");
+                }
+                finally
+                {
+                    const string drop_root = "/tmp/drop/";
+
+                    foreach (string droppedPath in paths)
+                    {
+                        try
+                        {
+                            string fullPath = Path.GetFullPath(droppedPath);
+                            if (fullPath.StartsWith(drop_root, StringComparison.Ordinal) && File.Exists(fullPath))
+                                File.Delete(fullPath);
+                        }
+                        catch (Exception e)
+                        {
+                            Logger.Error(e, $@"Could not delete temporary dropped file ({droppedPath})");
+                        }
+                    }
+                }
+            }
+#endif
         }
 
         [BackgroundDependencyLoader]

@@ -1,0 +1,15 @@
+import { chromium } from 'playwright-core';
+import os from 'node:os'; import fs from 'node:fs'; import { execSync } from 'node:child_process';
+const cache = `${os.homedir()}/Library/Caches/ms-playwright`;
+const dir = fs.readdirSync(cache).find(d => d.startsWith('chromium-'));
+const exe = `${cache}/${dir}/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing`;
+const b = await chromium.launch({ executablePath: exe, headless: true, args: ['--use-angle=metal','--enable-gpu','--ignore-gpu-blocklist','--autoplay-policy=no-user-gesture-required','--ignore-certificate-errors'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 }, ignoreHTTPSErrors: true });
+const t0 = Date.now(); const T = () => ((Date.now()-t0)/1000).toFixed(1).padStart(6);
+p.on('console', m => console.log(`${T()} ${m.text().slice(0, 240).replace(/\n/g,' ⏎ ')}`));
+p.on('pageerror', e => console.log(`${T()} [pageerror] ${e}`));
+p.on('worker', w => { w.on('console', m => console.log(`${T()} [worker] ${m.text().slice(0, 400).replace(/\n/g,' ⏎ ')}`)); w.on('close', () => console.log(`${T()} [worker closed]`)); });
+await p.goto(process.argv[2]);
+const iv = setInterval(() => { const r = Number(execSync(`ps -axo rss,command | grep "Chrome for Testing" | grep "type=renderer" | grep -v grep | awk '{s+=$1} END {print s}'`).toString())/1024; console.log(`${T()} ---- renderer=${r.toFixed(0)}MB`); }, 2000);
+await p.waitForTimeout(Number(process.argv[3]) * 1000);
+clearInterval(iv); await b.close();

@@ -401,6 +401,13 @@ namespace osu.Game.Beatmaps
 
                     var ruleset = realm.All<RulesetInfo>().FirstOrDefault(r => r.OnlineID == decodedInfo.Ruleset.OnlineID);
 
+#if OSU_WEB
+                    // Realm instances on separate browser workers may not observe startup-populated rulesets immediately.
+                    // The decoder already resolved this to an available, detached ruleset, so attach a copy to this transaction.
+                    if (ruleset == null && decodedInfo.Ruleset.Available)
+                        ruleset = realm.Add(decodedInfo.Ruleset.Clone(), true);
+#endif
+
                     if (ruleset?.Available != true)
                     {
                         LogForModel(beatmapSet, $"Skipping import of {file.Filename} due to missing local ruleset {decodedInfo.Ruleset.OnlineID}.");

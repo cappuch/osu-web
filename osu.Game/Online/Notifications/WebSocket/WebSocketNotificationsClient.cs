@@ -74,7 +74,11 @@ namespace osu.Game.Online.Notifications.WebSocket
                             throw new NotImplementedException("Binary message type not supported.");
 
                         case WebSocketMessageType.Close:
+#if OSU_WEB
+                            throw new InvalidOperationException("Connection closed by remote host.");
+#else
                             throw new WebException("Connection closed by remote host.");
+#endif
                     }
                 }
                 catch (Exception ex)

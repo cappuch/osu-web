@@ -4,6 +4,9 @@
     <OutputType>Library</OutputType>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(OsuWebBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);OSU_WEB</DefineConstants>
+  </PropertyGroup>
   <PropertyGroup Label="Nuget">
     <Title>osu!</Title>
     <PackageId>ppy.osu.Game</PackageId>
@@ -38,7 +41,8 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Realm" Version="20.1.0"/>
-    <PackageReference Include="ppy.osu.Framework" Version="2026.921.0"/>
+    <PackageReference Include="ppy.osu.Framework" Version="2026.921.0" Condition="'$(OsuWebBuild)' != 'true'"/>
+    <ProjectReference Include="..\external\osu-framework\osu.Framework\osu.Framework.csproj" Condition="'$(OsuWebBuild)' == 'true'"/>
     <PackageReference Include="ppy.osu.Game.Resources" Version="2026.921.0"/>
     <PackageReference Include="Sentry" Version="6.11.0"/>
     <PackageReference Include="SharpCompress" Version="0.50.4"/>

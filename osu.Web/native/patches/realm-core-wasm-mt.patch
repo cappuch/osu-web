@@ -1,0 +1,138 @@
+diff --git a/src/realm/object-store/impl/emscripten/external_commit_helper.cpp b/src/realm/object-store/impl/emscripten/external_commit_helper.cpp
+index 034b9ed..bb6f079 100644
+--- a/src/realm/object-store/impl/emscripten/external_commit_helper.cpp
++++ b/src/realm/object-store/impl/emscripten/external_commit_helper.cpp
+@@ -16,9 +16,7 @@
+ //
+ ////////////////////////////////////////////////////////////////////////////
+ 
+-#if defined(__EMSCRIPTEN_PTHREADS__) || defined(__EMSCRIPTEN_WASM_WORKERS__)
+-#error "This ExternalCommitHelper implementation is not compatible with multi-threaded WebAssembly."
+-#endif
++// osu-web: under -pthread a background thread (see header) runs RealmCoordinator::on_change().
+ 
+ #include <realm/object-store/impl/external_commit_helper.hpp>
+ #include <realm/object-store/impl/realm_coordinator.hpp>
+@@ -26,6 +24,49 @@
+ using namespace realm;
+ using namespace realm::_impl;
+ 
++#if defined(__EMSCRIPTEN_PTHREADS__)
++
++ExternalCommitHelper::ExternalCommitHelper(RealmCoordinator& parent, const RealmConfig&)
++    : m_parent(parent)
++{
++    m_thread = std::thread([this] {
++        std::unique_lock<std::mutex> lock(m_mutex);
++        while (true) {
++            m_cv.wait(lock, [this] {
++                return m_pending || m_stop;
++            });
++            if (m_stop)
++                return;
++            m_pending = false;
++            lock.unlock();
++            m_parent.on_change();
++            lock.lock();
++        }
++    });
++}
++
++ExternalCommitHelper::~ExternalCommitHelper()
++{
++    {
++        std::lock_guard<std::mutex> lock(m_mutex);
++        m_stop = true;
++    }
++    m_cv.notify_one();
++    if (m_thread.joinable())
++        m_thread.join();
++}
++
++void ExternalCommitHelper::notify_others()
++{
++    {
++        std::lock_guard<std::mutex> lock(m_mutex);
++        m_pending = true;
++    }
++    m_cv.notify_one();
++}
++
++#else
++
+ ExternalCommitHelper::ExternalCommitHelper(RealmCoordinator& parent, const RealmConfig&)
+     : m_parent(parent)
+ {
+@@ -35,3 +76,5 @@ void ExternalCommitHelper::notify_others()
+ {
+     m_parent.on_change();
+ }
++
++#endif
+diff --git a/src/realm/object-store/impl/emscripten/external_commit_helper.hpp b/src/realm/object-store/impl/emscripten/external_commit_helper.hpp
+index 9c53a78..60b0c2a 100644
+--- a/src/realm/object-store/impl/emscripten/external_commit_helper.hpp
++++ b/src/realm/object-store/impl/emscripten/external_commit_helper.hpp
+@@ -16,6 +16,12 @@
+ //
+ ////////////////////////////////////////////////////////////////////////////
+ 
++#if defined(__EMSCRIPTEN_PTHREADS__)
++#include <condition_variable>
++#include <mutex>
++#include <thread>
++#endif
++
+ namespace realm {
+ struct RealmConfig;
+ 
+@@ -25,12 +31,26 @@ class RealmCoordinator;
+ class ExternalCommitHelper {
+ public:
+     ExternalCommitHelper(RealmCoordinator& parent, const RealmConfig&);
++#if defined(__EMSCRIPTEN_PTHREADS__)
++    ~ExternalCommitHelper();
++#else
+     ~ExternalCommitHelper() = default;
++#endif
+ 
+     void notify_others();
+ 
+ private:
+     RealmCoordinator& m_parent;
++#if defined(__EMSCRIPTEN_PTHREADS__)
++    // osu-web: multithreaded wasm. Like the epoll implementation, change notifications are
++    // delivered on a dedicated background thread; calling RealmCoordinator::on_change()
++    // synchronously from notify_others() deadlocks once mutexes are real (pthreads).
++    std::mutex m_mutex;
++    std::condition_variable m_cv;
++    bool m_pending = false;
++    bool m_stop = false;
++    std::thread m_thread;
++#endif
+ };
+ 
+ } // namespace _impl
+diff --git a/src/realm/object-store/util/scheduler.cpp b/src/realm/object-store/util/scheduler.cpp
+index 4f3d992..2baaf09 100644
+--- a/src/realm/object-store/util/scheduler.cpp
++++ b/src/realm/object-store/util/scheduler.cpp
+@@ -41,7 +41,7 @@
+ #include <realm/object-store/util/android/scheduler.hpp>
+ #endif
+ 
+-#if defined(__EMSCRIPTEN__)
++#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__) && !defined(__EMSCRIPTEN_WASM_WORKERS__)
+ #include <realm/object-store/util/emscripten/scheduler.hpp>
+ #endif
+ 
+@@ -136,6 +136,9 @@ std::shared_ptr<Scheduler> Scheduler::make_platform_default()
+     return make_runloop(nullptr);
+ #elif defined(HAS_ANDROID_ALOOPER)
+     return make_alooper();
++#elif defined(__EMSCRIPTEN_PTHREADS__) || defined(__EMSCRIPTEN_WASM_WORKERS__)
++    // osu-web: multithreaded wasm; the .NET wrappers install their own default factory anyway.
++    return make_generic();
+ #elif defined(__EMSCRIPTEN__)
+     return std::make_shared<EmscriptenScheduler>();
+ #else

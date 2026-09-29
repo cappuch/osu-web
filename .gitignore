@@ -342,5 +342,16 @@ inspectcode
 # Fody (pulled in by Realm) - schema file
 FodyWeavers.xsd
 
+# osu!web local checkout and generated deployment output.
+# native/lib is intentionally not ignored; the prebuilt WebAssembly archives are deployment inputs.
+.DS_Store
+/.maiku/
+/external/
+/osu.Web/dist/
+/osu.Web/patched/
+/osu.Web/native/build/
+/osu.Web/tools/bin/
+/osu.Web/tools/.certs/
+
 .idea/.idea.osu.Desktop/.idea/misc.xml
 .idea/.idea.osu.Android/.idea/deploymentTargetDropDown.xml

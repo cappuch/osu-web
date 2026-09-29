@@ -1,0 +1,107 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <!--
+    osu! for the web: runs osu!lazer (osu.Game + rulesets, unmodified game code) on .NET's WebAssembly runtime (Mono, compiled
+    with Emscripten), using the web backend of osu!framework (external/osu-framework, OSU_WEB).
+    Build with ./build.sh (requires -p:OsuWebBuild=true to be passed globally so that osu.Game references the local framework).
+  -->
+  <PropertyGroup Label="Project">
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>osu.Web</AssemblyName>
+    <RootNamespace>osu.Web</RootNamespace>
+    <Nullable>enable</Nullable>
+    <Version>0.0.0</Version>
+    <ApplicationManifest />
+  </PropertyGroup>
+
+  <PropertyGroup Label="WebAssembly">
+    <!-- Real threads are required: osu!framework and osu! block on background work, and the game loop runs on its own thread. -->
+    <WasmEnableThreads>true</WasmEnableThreads>
+    <WasmBuildNative>true</WasmBuildNative>
+    <WasmFingerprintAssets>false</WasmFingerprintAssets>
+    <OverrideHtmlAssetPlaceholders>false</OverrideHtmlAssetPlaceholders>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- osu! relies heavily on reflection (rulesets, realm, serialisation). -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <WasmEnableSIMD>true</WasmEnableSIMD>
+    <WasmEnableExceptionHandling>true</WasmEnableExceptionHandling>
+    <EmccMaximumHeapSize>2147483648</EmccMaximumHeapSize>
+    <EmccInitialHeapSize>268435456</EmccInitialHeapSize>
+    <!-- AOT compilation is much faster at runtime but takes a long time to build; enable with -p:OsuWebAot=true. -->
+    <RunAOTCompilation Condition="'$(OsuWebAot)' == 'true'">true</RunAOTCompilation>
+    <!-- AOT requires the trimmer. Partial mode only trims assemblies marked trimmable, so the reflection-heavy game assemblies are kept whole. -->
+    <PublishTrimmed Condition="'$(OsuWebAot)' == 'true'">true</PublishTrimmed>
+    <TrimMode Condition="'$(OsuWebAot)' == 'true'">partial</TrimMode>
+    <WasmNativeStrip>true</WasmNativeStrip>
+    <EmccExtraLDFlags>--js-library "$(MSBuildThisFileDirectory)native/osuweb.js" -lGL -lidbfs.js -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2 -sFULL_ES3=1 -sSTACK_SIZE=8MB -sDEFAULT_PTHREAD_STACK_SIZE=2MB</EmccExtraLDFlags>
+  </PropertyGroup>
+
+  <ItemGroup Label="Assemblies left interpreted in AOT builds" Condition="'$(OsuWebAot)' == 'true'">
+    <!-- Desktop-only bindings, several of which the AOT compiler cannot handle; never called on the web. -->
+    <_AOT_InternalForceInterpretAssemblies Include="SDL3-CS.dll;SDL2-CS.dll;alsa-sharp.dll;osuTK.dll;vk.dll;FFmpeg.AutoGen.dll;HidSharpCore.dll;Commons.Music.Midi.dll" />
+    <_AOT_InternalForceInterpretAssemblies Include="Vortice.D3DCompiler.dll;Vortice.DXGI.dll;Vortice.Direct3D11.dll;Vortice.DirectX.dll;Vortice.Mathematics.dll;SharpGen.Runtime.dll;SharpGen.Runtime.COM.dll" />
+    <_AOT_InternalForceInterpretAssemblies Include="ppy.Veldrid.MetalBindings.dll;ppy.ManagedBass.Wasapi.dll;nunit.framework.dll;nunit.framework.legacy.dll" />
+    <_AOT_InternalForceInterpretAssemblies Include="OpenTabletDriver.dll;OpenTabletDriver.Configurations.dll;OpenTabletDriver.Native.dll;OpenTabletDriver.Plugin.dll" />
+    <!-- Embedded assets only; compiling it adds build time for no runtime benefit. -->
+    <_AOT_InternalForceInterpretAssemblies Include="osu.Game.Resources.dll" />
+  </ItemGroup>
+
+  <ItemGroup Label="Native libraries (built with Emscripten, see native/)">
+    <!-- WebGL 2 (OpenGL ES 3.0) is provided by Emscripten (-lGL); this gives the P/Invoke table a module name to bind against. -->
+    <NativeFileReference Include="native/libGLESv2.c" />
+    <!-- Browser integration for the game thread (OffscreenCanvas / presentation), implemented in native/osuweb.js. -->
+    <NativeFileReference Include="native/osuweb.c" />
+    <!-- Realm database (realm-core + realm-dotnet wrappers), see native/build-realm.sh -->
+    <NativeFileReference Include="native/lib/realm/realm-wrappers.a" />
+    <!-- GLSL -> SPIR-V -> GLSL ES shader cross compilation (shaderc + SPIRV-Cross), see native/build-spirv.sh -->
+    <NativeFileReference Include="native/lib/spirv/libveldrid-spirv.a" />
+  </ItemGroup>
+
+  <!--
+    Realm's P/Invokes pass structs by value, which the WebAssembly P/Invoke table generator doesn't support.
+    Swap in a copy of Realm.dll rewritten by tools/PInvokePatcher (ABI-compatible `ref` parameters on wasm32).
+  -->
+  <PropertyGroup>
+    <OsuWebPInvokePatcher>$(MSBuildThisFileDirectory)tools/bin/PInvokePatcher/PInvokePatcher.dll</OsuWebPInvokePatcher>
+    <OsuWebPatchedDir>$(MSBuildProjectDirectory)/$(IntermediateOutputPath)patched/</OsuWebPatchedDir>
+  </PropertyGroup>
+
+  <Target Name="OsuWebBuildPInvokePatcher" BeforeTargets="OsuWebPatchRealm">
+    <Exec Command="dotnet build &quot;$(MSBuildThisFileDirectory)tools/PInvokePatcher/PInvokePatcher.csproj&quot; -c Release -o &quot;$(MSBuildThisFileDirectory)tools/bin/PInvokePatcher&quot; -p:OsuWebBuild=false" />
+  </Target>
+
+  <Target Name="OsuWebPatchRealm" AfterTargets="ResolvePackageAssets">
+    <ItemGroup>
+      <_OsuWebRealmAssembly Include="@(RuntimeCopyLocalItems)" Condition="'%(Filename)%(Extension)' == 'Realm.dll'" />
+    </ItemGroup>
+    <Exec Command="dotnet &quot;$(OsuWebPInvokePatcher)&quot; &quot;@(_OsuWebRealmAssembly)&quot; &quot;$(OsuWebPatchedDir)Realm.dll&quot;" Condition="'@(_OsuWebRealmAssembly)' != ''" StandardOutputImportance="low" />
+    <ItemGroup Condition="'@(_OsuWebRealmAssembly)' != ''">
+      <RuntimeCopyLocalItems Remove="@(_OsuWebRealmAssembly)" />
+      <RuntimeCopyLocalItems Include="@(_OsuWebRealmAssembly->'$(OsuWebPatchedDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The e_sqlite3 archive shipped on NuGet isn't built with -pthread; use our own (native/build-sqlite.sh). -->
+  <Target Name="OsuWebReplaceSqlite" BeforeTargets="PrepareForWasmBuildNative;_PrepareForBrowserWasmBuildNative">
+    <ItemGroup>
+      <NativeFileReference Remove="@(NativeFileReference)" Condition="'%(Filename)%(Extension)' == 'e_sqlite3.a'" />
+      <NativeFileReference Include="$(MSBuildThisFileDirectory)native/lib/sqlite/e_sqlite3.a" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup Label="Project References">
+    <ProjectReference Include="..\osu.Game\osu.Game.csproj" />
+    <ProjectReference Include="..\osu.Game.Rulesets.Osu\osu.Game.Rulesets.Osu.csproj" />
+    <ProjectReference Include="..\osu.Game.Rulesets.Catch\osu.Game.Rulesets.Catch.csproj" />
+    <ProjectReference Include="..\osu.Game.Rulesets.Mania\osu.Game.Rulesets.Mania.csproj" />
+    <ProjectReference Include="..\osu.Game.Rulesets.Taiko\osu.Game.Rulesets.Taiko.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Keep tooling out of the build. -->
+    <Compile Remove="tools/**" />
+    <None Remove="tools/**" />
+    <Content Remove="tools/**" />
+  </ItemGroup>
+</Project>

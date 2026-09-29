@@ -1,0 +1,28 @@
+# Local repositories and generated build output. The exact framework revision is
+# fetched and patched by osu.Web/vercel-build.sh.
+.git/
+.vercel/
+external/
+
+**/.DS_Store
+**/bin/
+**/obj/
+osu.Web/dist/
+osu.Web/patched/
+osu.Web/native/build/
+osu.Web/tools/node_modules/
+
+# Developer-only projects not used by the browser build.
+CodeAnalysis/
+Templates/
+osu.Android/
+osu.Desktop/
+osu.iOS/
+osu.Game.Benchmarks/
+osu.Game.Tests/
+osu.Game.Tournament/
+osu.Game.Tournament.Tests/
+osu.Game.Rulesets.Catch.Tests*/
+osu.Game.Rulesets.Mania.Tests*/
+osu.Game.Rulesets.Osu.Tests*/
+osu.Game.Rulesets.Taiko.Tests*/

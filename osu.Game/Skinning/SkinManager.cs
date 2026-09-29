@@ -63,6 +63,8 @@ namespace osu.Game.Skinning
 
         private Skin argonSkin { get; }
 
+        private Skin argonProSkin { get; }
+
         private Skin trianglesSkin { get; }
 
         private Skin retroSkin { get; }
@@ -104,9 +106,10 @@ namespace osu.Game.Skinning
                 DefaultClassicSkin = new DefaultLegacySkin(this),
                 trianglesSkin = new TrianglesSkin(this),
                 argonSkin = new ArgonSkin(this),
-                new ArgonProSkin(this),
+                argonProSkin = new ArgonProSkin(this),
             };
 
+#if !OSU_WEB
             // Ensure the default entries are present.
             realm.Write(r =>
             {
@@ -116,6 +119,7 @@ namespace osu.Game.Skinning
                         r.Add(skin.SkinInfo.Value);
                 }
             });
+#endif
 
             CurrentSkinInfo.ValueChanged += skin =>
             {
@@ -146,6 +150,27 @@ namespace osu.Game.Skinning
         {
             var skins = new List<Live<SkinInfo>>();
 
+#if OSU_WEB
+            // Built-in skins do not need to be persisted. Keeping them unmanaged also avoids unnecessary cross-worker Realm access.
+            skins.Add(argonSkin.SkinInfo);
+            skins.Add(argonProSkin.SkinInfo);
+            skins.Add(trianglesSkin.SkinInfo);
+            skins.Add(DefaultClassicSkin.SkinInfo);
+            skins.Add(retroSkin.SkinInfo);
+            skins.Add(random_skin_info);
+
+            Realm.Run(realm =>
+            {
+                var userSkins = realm.All<SkinInfo>()
+                                     .Where(s => !s.DeletePending && !s.Protected)
+                                     .AsEnumerable()
+                                     .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
+                                     .Select(s => s.ToLive(Realm));
+
+                foreach (var s in userSkins)
+                    skins.Add(s);
+            });
+#else
             Realm.Run(realm =>
             {
                 skins.Add(realm.Find<SkinInfo>(SkinInfo.ARGON_SKIN).ToLive(Realm));
@@ -165,6 +190,7 @@ namespace osu.Game.Skinning
                 foreach (var s in userSkins)
                     skins.Add(s);
             });
+#endif
 
             return skins;
         }
@@ -439,7 +465,21 @@ namespace osu.Game.Skinning
             Live<SkinInfo> skinInfo = null;
 
             if (Guid.TryParse(guidString, out var guid))
+            {
+#if OSU_WEB
+                skinInfo = guid switch
+                {
+                    var id when id == SkinInfo.ARGON_SKIN => argonSkin.SkinInfo,
+                    var id when id == SkinInfo.ARGON_PRO_SKIN => argonProSkin.SkinInfo,
+                    var id when id == SkinInfo.TRIANGLES_SKIN => trianglesSkin.SkinInfo,
+                    var id when id == SkinInfo.CLASSIC_SKIN => DefaultClassicSkin.SkinInfo,
+                    var id when id == SkinInfo.RETRO_SKIN => retroSkin.SkinInfo,
+                    _ => Query(s => s.ID == guid),
+                };
+#else
                 skinInfo = Query(s => s.ID == guid);
+#endif
+            }
 
             if (skinInfo == null)
             {
